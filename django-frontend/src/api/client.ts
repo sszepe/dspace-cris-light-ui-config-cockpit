@@ -103,13 +103,17 @@ export const api = {
   patchFilter:   (id: number, data: unknown) => apiFetch<PresetFilter>(`${BASE}/quickpreset-filters/${id}/`, { method: "PATCH", body: data }),
   deleteFilter:  (id: number) => apiFetch<void>(`${BASE}/quickpreset-filters/${id}/`, { method: "DELETE" }),
 
-  // Submission forms (read-only)
+  // Submission forms
   submissionForms: () => apiFetch<SubmissionFormList[]>(`${BASE}/submission-forms/`),
   submissionForm:  (id: number) => apiFetch<SubmissionFormDetail>(`${BASE}/submission-forms/${id}/`),
+  patchSubmissionFormField: (id: number, data: unknown) =>
+    apiFetch<SubmissionFormField>(`${BASE}/submission-forms/fields/${id}/`, { method: "PATCH", body: data }),
 
-  // Submission processes (read-only)
+  // Submission processes
   submissionProcesses: () => apiFetch<SubmissionProcessList[]>(`${BASE}/submission-processes/`),
   submissionProcess:   (id: number) => apiFetch<SubmissionProcess>(`${BASE}/submission-processes/${id}/`),
+  patchSubmissionProcessStep: (id: number, data: unknown) =>
+    apiFetch<SubmissionProcessStep>(`${BASE}/submission-process-steps/${id}/`, { method: "PATCH", body: data }),
 
   // Form layouts
   formLayouts:   () => apiFetch<FormLayout[]>(`${BASE}/form-layouts/`),
@@ -119,7 +123,9 @@ export const api = {
 
   // Metadata
   metadataSchemas: (q?: string) => apiFetch<MetadataSchema[]>(`${BASE}/metadata-schemas/${q ? "?q=" + encodeURIComponent(q) : ""}`),
+  metadataSchema:  (id: number)  => apiFetch<MetadataSchemaDetail>(`${BASE}/metadata-schemas/${id}/`),
   metadataFields:  (q: string)  => apiFetch<MetadataField[]>(`${BASE}/metadata-fields/?q=${encodeURIComponent(q)}`),
+  metadataFieldsBySchema: (schema: string) => apiFetch<MetadataField[]>(`${BASE}/metadata-fields/?schema=${encodeURIComponent(schema)}&q=`),
 
   // Audit
   auditFormsSummary: () => apiFetch<unknown>(`${BASE}/audit/forms-summary/`),
@@ -217,9 +223,19 @@ export interface SubmissionFormField {
   label: string;
   input_type: string;
   is_required: boolean;
+  required_msg: string;
   repeatable: boolean;
   vocabulary: string;
+  vocabulary_closed: boolean;
+  value_pairs_name: string;
+  hint: string;
+  style: string;
+  regex: string;
+  language_codes: string[];
+  type_binds: string[];
   child_form_name: string;
+  child_form: number | null;
+  child_form_name_resolved: string | null;
 }
 
 export interface SubmissionFormDetail extends SubmissionFormList {
@@ -286,6 +302,10 @@ export interface MetadataSchema {
   title: string;
   source: string;
   field_count: number;
+}
+
+export interface MetadataSchemaDetail extends MetadataSchema {
+  fields: MetadataField[];
 }
 
 export interface MetadataField {

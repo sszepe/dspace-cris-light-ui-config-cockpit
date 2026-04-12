@@ -159,7 +159,6 @@ function BoxCard({
   onEditField: (b: CrisBox, f: BoxField) => void;
   onDeleteField: (b: CrisBox, f: BoxField) => void;
   onReorderFields: (b: CrisBox, newOrder: BoxField[]) => void;
-  metadataGroups: MetadataGroup[];
 }) {
   const dragIdx = useRef<number | null>(null);
 
@@ -173,6 +172,7 @@ function BoxCard({
     onReorderFields(box, renumbered);
     dragIdx.current = null;
   }
+
 
   return (
     <div style={{
@@ -265,14 +265,13 @@ function BoxCard({
 // ── Tab panel ─────────────────────────────────────────────────────────────────
 
 function TabPanel({
-  tab, tab2box, boxes, metadataGroups,
+  tab, tab2box, boxes,
   onEditTab, onDeleteTab,
   onEditBox, onDeleteBox, onAddBox, onAddField, onEditField, onDeleteField, onReorderFields,
 }: {
   tab: CrisTab;
   tab2box: Tab2Box[];
   boxes: CrisBox[];
-  metadataGroups: MetadataGroup[];
   onEditTab: (t: CrisTab) => void;
   onDeleteTab: (t: CrisTab) => void;
   onEditBox: (b: CrisBox) => void;
@@ -335,7 +334,6 @@ function TabPanel({
             onEditField={onEditField}
             onDeleteField={onDeleteField}
             onReorderFields={onReorderFields}
-            metadataGroups={metadataGroups}
           />
         ))
       )}
@@ -343,6 +341,115 @@ function TabPanel({
         onClick={() => onAddBox(tab.shortname)}>
         + Add Box to Tab
       </button>
+    </div>
+  );
+}
+
+
+// ── MetadataFieldTypeahead ─────────────────────────────────────────────────────
+
+const META_BASE = "/api/dspace-config";
+
+function MetadataFieldTypeahead({
+  value,
+  onChange,
+  placeholder = "e.g. dc.title, dc.contributor.author",
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  const [query, setQuery] = useState(value);
+  const [suggestions, setSuggestions] = useState<{ id: number; field: string }[]>([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // sync external value → local query when modal resets
+  useEffect(() => { setQuery(value); }, [value]);
+
+  // close on outside click
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  function handleInput(v: string) {
+    setQuery(v);
+    onChange(v);
+    if (debounce.current) clearTimeout(debounce.current);
+    if (!v.trim()) { setSuggestions([]); setOpen(false); return; }
+    debounce.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const res = await apiFetch<{ id: number; field: string }[]>(
+          `${META_BASE}/metadata-fields/?q=${encodeURIComponent(v)}`
+        );
+        setSuggestions(res.slice(0, 12));
+        setOpen(res.length > 0);
+      } catch {
+        setSuggestions([]);
+      } finally {
+        setLoading(false);
+      }
+    }, 220);
+  }
+
+  function pick(field: string) {
+    setQuery(field);
+    onChange(field);
+    setSuggestions([]);
+    setOpen(false);
+  }
+
+  return (
+    <div ref={containerRef} style={{ position: "relative" }}>
+      <div style={{ position: "relative" }}>
+        <input
+          type="text"
+          value={query}
+          onChange={e => handleInput(e.target.value)}
+          onFocus={() => { if (suggestions.length) setOpen(true); }}
+          placeholder={placeholder}
+          style={{ width: "100%", paddingRight: loading ? 28 : undefined }}
+        />
+        {loading && (
+          <span style={{
+            position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+            fontSize: 11, color: "var(--muted)",
+          }}>…</span>
+        )}
+      </div>
+      {open && suggestions.length > 0 && (
+        <ul style={{
+          position: "absolute", zIndex: 9999, top: "100%", left: 0, right: 0,
+          background: "#fff", border: "1px solid #e2e8f0",
+          borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.1)",
+          margin: 0, padding: "4px 0", listStyle: "none",
+          maxHeight: 200, overflowY: "auto",
+        }}>
+          {suggestions.map(s => (
+            <li
+              key={s.id}
+              onMouseDown={() => pick(s.field)}
+              style={{
+                padding: "6px 12px", fontSize: 12, cursor: "pointer",
+                fontFamily: "monospace", color: "#1e293b",
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = "#f0f4ff")}
+              onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+            >
+              {s.field}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -401,8 +508,11 @@ function FieldModal({ box, field, onClose, onSaved }: {
           </select>
         </FormGroup>
       </div>
-      <FormGroup label="Metadata field" hint="e.g. dc.title, dc.contributor.author">
-        <input type="text" value={form.metadata ?? ""} onChange={e => set({ metadata: e.target.value })} />
+      <FormGroup label="Metadata field" hint="Start typing to search the metadata registry">
+        <MetadataFieldTypeahead
+          value={form.metadata ?? ""}
+          onChange={v => set({ metadata: v })}
+        />
       </FormGroup>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <FormGroup label="Value" hint="Filter value for BITSTREAM types">
@@ -444,6 +554,104 @@ function FieldModal({ box, field, onClose, onSaved }: {
         <button className="btn" onClick={onClose} disabled={saving}>Cancel</button>
         <button className="btn btn-primary" onClick={save} disabled={saving}>
           {saving ? <><Spinner white /> Saving…</> : "Save Field"}
+        </button>
+      </ModalActions>
+    </Modal>
+  );
+}
+
+
+// ── Metadata group modal (Create / Edit) ──────────────────────────────────────
+
+const EMPTY_GROUP: Partial<MetadataGroup> = {
+  field_type: "METADATA", parent: "", metadata: "",
+  value: "", bundle: "", label: "", rendering: "", style_label: "", style_value: "",
+};
+
+function MetadataGroupModal({ entity, group, onClose, onSaved }: {
+  entity: string; group: MetadataGroup | null; onClose: () => void; onSaved: () => void;
+}) {
+  const [form, setForm] = useState<Partial<MetadataGroup>>(
+    group ? { ...group } : { ...EMPTY_GROUP, entity }
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  function set(p: Partial<MetadataGroup>) { setForm(f => ({ ...f, ...p })); }
+
+  async function save() {
+    setSaving(true); setError("");
+    try {
+      if (group) {
+        await apiFetch(`${BASE}/metadata-groups/${group.id}/`, { method: "PATCH", body: form });
+      } else {
+        await apiFetch(`${BASE}/metadata-groups/`, { method: "POST", body: { ...form, entity } });
+      }
+      onSaved();
+    } catch (e: any) {
+      setError(e?.detail ?? JSON.stringify(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal title={group ? "Edit Metadata Group" : "Add Metadata Group"} onClose={onClose} wide>
+      {error && <Alert type="error">{error}</Alert>}
+
+      <FormGroup label="Parent field" hint="The metadata field that acts as the group key (e.g. dc.contributor.author)">
+        <MetadataFieldTypeahead
+          value={form.parent ?? ""}
+          onChange={v => set({ parent: v })}
+          placeholder="e.g. dc.contributor.author"
+        />
+      </FormGroup>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <FormGroup label="Field Type">
+          <select value={form.field_type} onChange={e => set({ field_type: e.target.value })}>
+            {FIELD_TYPE_OPTIONS.map(o => <option key={o}>{o}</option>)}
+          </select>
+        </FormGroup>
+        <FormGroup label="Rendering">
+          <select value={form.rendering ?? ""} onChange={e => set({ rendering: e.target.value })}>
+            {RENDERING_OPTIONS.map(o => <option key={o} value={o}>{o || "(none)"}</option>)}
+          </select>
+        </FormGroup>
+      </div>
+
+      <FormGroup label="Metadata field" hint="The child metadata field within the group">
+        <MetadataFieldTypeahead
+          value={form.metadata ?? ""}
+          onChange={v => set({ metadata: v })}
+          placeholder="e.g. oairecerif.author.affiliation"
+        />
+      </FormGroup>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <FormGroup label="Value" hint="Fixed value / dc.type filter for BITSTREAM types">
+          <input type="text" value={form.value ?? ""} onChange={e => set({ value: e.target.value })} />
+        </FormGroup>
+        <FormGroup label="Bundle" hint="e.g. ORIGINAL">
+          <input type="text" value={form.bundle ?? ""} onChange={e => set({ bundle: e.target.value })} />
+        </FormGroup>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <FormGroup label="Label">
+          <input type="text" value={form.label ?? ""} onChange={e => set({ label: e.target.value })} />
+        </FormGroup>
+        <FormGroup label="Style Label" hint="CSS classes for the label cell">
+          <input type="text" value={form.style_label ?? ""} onChange={e => set({ style_label: e.target.value })} />
+        </FormGroup>
+      </div>
+      <FormGroup label="Style Value" hint="CSS classes for the value cell">
+        <input type="text" value={form.style_value ?? ""} onChange={e => set({ style_value: e.target.value })} />
+      </FormGroup>
+
+      <ModalActions>
+        <button className="btn" onClick={onClose} disabled={saving}>Cancel</button>
+        <button className="btn btn-primary" onClick={save} disabled={saving}>
+          {saving ? <><Spinner white /> Saving…</> : group ? "Save Changes" : "Add Group"}
         </button>
       </ModalActions>
     </Modal>
@@ -586,6 +794,7 @@ export function CrisLayoutPage() {
   const [tabModal, setTabModal] = useState<{ open: boolean; tab: CrisTab | null }>({ open: false, tab: null });
   const [boxModal, setBoxModal] = useState<{ open: boolean; box: CrisBox | null }>({ open: false, box: null });
   const [fieldModal, setFieldModal] = useState<{ open: boolean; box: CrisBox | null; field: BoxField | null }>({ open: false, box: null, field: null });
+  const [groupModal, setGroupModal] = useState<{ open: boolean; group: MetadataGroup | null }>({ open: false, group: null });
 
   const { notice, notify } = useNotice();
 
@@ -670,6 +879,15 @@ export function CrisLayoutPage() {
       );
       loadLayout(selectedEntity);
     } catch { notify("error", "Reorder failed."); }
+  }
+
+  async function deleteGroup(group: MetadataGroup) {
+    if (!confirm(`Delete metadata group entry for parent "${group.parent}" / "${group.metadata}"?`)) return;
+    try {
+      await apiFetch(`${BASE}/metadata-groups/${group.id}/`, { method: "DELETE" });
+      notify("success", "Metadata group entry deleted.");
+      loadLayout(selectedEntity);
+    } catch { notify("error", "Delete failed."); }
   }
 
   const currentTab = layout?.tabs.find(t => t.shortname === activeTab) ?? null;
@@ -765,7 +983,6 @@ export function CrisLayoutPage() {
               tab={currentTab}
               tab2box={layout.tab2box}
               boxes={layout.boxes}
-              metadataGroups={layout.metadata_groups}
               onEditTab={(t) => setTabModal({ open: true, tab: t })}
               onDeleteTab={deleteTab}
               onEditBox={(b) => setBoxModal({ open: true, box: b })}
@@ -780,30 +997,68 @@ export function CrisLayoutPage() {
             <EmptyState msg="Select a tab above, or create a new one." />
           )}
 
-          {/* Metadata groups summary */}
-          {layout.metadata_groups.length > 0 && (
-            <div className="card" style={{ marginTop: 20 }}>
-              <div className="card-title">
-                Metadata Groups <span className="count-badge">{layout.metadata_groups.length}</span>
+          {/* Metadata groups — full CRUD */}
+          <div className="card" style={{ marginTop: 20 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <div className="card-title" style={{ margin: 0 }}>
+                Metadata Groups{" "}
+                <span className="count-badge">{layout.metadata_groups.length}</span>
               </div>
+              <button
+                className="btn btn-primary"
+                style={{ fontSize: 12, padding: "5px 12px" }}
+                onClick={() => setGroupModal({ open: true, group: null })}
+              >
+                + Add Group
+              </button>
+            </div>
+            {layout.metadata_groups.length === 0 ? (
+              <div style={{ padding: "20px 0", textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
+                No metadata groups defined for this entity.
+              </div>
+            ) : (
               <table>
                 <thead>
-                  <tr><th>Parent</th><th>Type</th><th>Metadata</th><th>Label</th><th>Rendering</th></tr>
+                  <tr>
+                    <th>Parent</th>
+                    <th>Type</th>
+                    <th>Metadata</th>
+                    <th>Label</th>
+                    <th>Rendering</th>
+                    <th style={{ width: 90 }}></th>
+                  </tr>
                 </thead>
                 <tbody>
                   {layout.metadata_groups.map(g => (
                     <tr key={g.id}>
-                      <td><code style={{ fontSize: 11 }}>{g.parent}</code></td>
+                      <td><code style={{ fontSize: 11, color: "var(--accent)" }}>{g.parent}</code></td>
                       <td><span className="chip chip-gray" style={{ fontSize: 10 }}>{g.field_type}</span></td>
-                      <td><code style={{ fontSize: 11 }}>{g.metadata}</code></td>
+                      <td><code style={{ fontSize: 11, color: "var(--accent)" }}>{g.metadata}</code></td>
                       <td style={{ fontSize: 12 }}>{g.label}</td>
                       <td>{g.rendering && <span className="chip chip-blue" style={{ fontSize: 10 }}>{g.rendering}</span>}</td>
+                      <td>
+                        <div style={{ display: "flex", gap: 4 }}>
+                          <button
+                            className="btn btn-sm"
+                            onClick={() => setGroupModal({ open: true, group: g })}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            className="btn btn-sm"
+                            style={{ color: "var(--danger)", borderColor: "var(--danger)" }}
+                            onClick={() => deleteGroup(g)}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>
-          )}
+            )}
+          </div>
         </>
       ) : null}
 
@@ -830,6 +1085,14 @@ export function CrisLayoutPage() {
           field={fieldModal.field}
           onClose={() => setFieldModal({ open: false, box: null, field: null })}
           onSaved={() => { setFieldModal({ open: false, box: null, field: null }); loadLayout(selectedEntity); notify("success", "Field saved."); }}
+        />
+      )}
+      {groupModal.open && (
+        <MetadataGroupModal
+          entity={selectedEntity}
+          group={groupModal.group}
+          onClose={() => setGroupModal({ open: false, group: null })}
+          onSaved={() => { setGroupModal({ open: false, group: null }); loadLayout(selectedEntity); notify("success", groupModal.group ? "Group updated." : "Group added."); }}
         />
       )}
     </div>
