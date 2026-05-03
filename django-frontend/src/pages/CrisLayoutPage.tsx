@@ -789,6 +789,7 @@ export function CrisLayoutPage() {
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<string>("");
   const [exporting, setExporting] = useState(false);
+  const [exportingAll, setExportingAll] = useState(false);
 
   // Modals
   const [tabModal, setTabModal] = useState<{ open: boolean; tab: CrisTab | null }>({ open: false, tab: null });
@@ -801,7 +802,7 @@ export function CrisLayoutPage() {
   // Load entity list
   useEffect(() => {
     apiFetch<{ entities: string[] }>(`${BASE}/entities/`)
-      .then(d => setEntities(d.entities))
+      .then(d => setEntities([...new Set(d.entities)].sort()))
       .catch(() => {});
   }, []);
 
@@ -839,6 +840,23 @@ export function CrisLayoutPage() {
       notify("error", "Export failed.");
     } finally {
       setExporting(false);
+    }
+  }
+
+  async function exportAllXls() {
+    setExportingAll(true);
+    try {
+      const res = await fetch(`${BASE}/export/`, { credentials: "include" });
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "cris-layout-configuration-all.xlsx";
+      a.click();
+    } catch {
+      notify("error", "Full export failed.");
+    } finally {
+      setExportingAll(false);
     }
   }
 
@@ -900,20 +918,20 @@ export function CrisLayoutPage() {
         actions={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {selectedEntity && (
-              <>
-                <button className="btn btn-primary" onClick={() => setTabModal({ open: true, tab: null })}>
-                  + New Tab
-                </button>
-                <button className="btn" onClick={exportXls} disabled={exporting}>
-                  {exporting ? <><Spinner /> Exporting…</> : "⬇ Download XLS"}
-                </button>
-              </>
-            )}
-            {!selectedEntity && (
-              <button className="btn" onClick={exportXls} disabled={exporting}>
-                {exporting ? <><Spinner /> Exporting…</> : "⬇ Download All XLS"}
+              <button className="btn btn-primary" onClick={() => setTabModal({ open: true, tab: null })}>
+                + New Tab
               </button>
             )}
+            {selectedEntity && (
+              <button className="btn" onClick={exportXls} disabled={exporting || exportingAll}
+                title={`Download XLS for ${selectedEntity} only`}>
+                {exporting ? <><Spinner /> Exporting…</> : `⬇ ${selectedEntity} XLS`}
+              </button>
+            )}
+            <button className="btn" onClick={exportAllXls} disabled={exporting || exportingAll}
+              title="Download full XLS with all entity types">
+              {exportingAll ? <><Spinner /> Exporting all…</> : "⬇ Download All XLS"}
+            </button>
           </div>
         }
       />
