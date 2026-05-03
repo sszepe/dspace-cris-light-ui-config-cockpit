@@ -23,6 +23,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { apiFetch } from "../api/client";
 import { PageHeader } from "../components/shared";
 
@@ -282,6 +283,137 @@ function FieldChip({ base, override, selected, placed, onDragStart, onClick, com
 // TypeaheadSidebar
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// FieldSearch — reusable typeahead input with portal dropdown.
+// Works in any container regardless of overflow/clipping.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function FieldSearch({ baseFields, metaFields, placed, onAdd, placeholder = "Search fields…" }: {
+  baseFields: BaseField[];
+  metaFields: MetaField[];
+  placed: Set<string>;
+  onAdd: (fieldName: string, src: "palette" | "meta") => void;
+  placeholder?: string;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(-1);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const wrapRef  = useRef<HTMLDivElement>(null);
+  const [dropPos, setDropPos] = useState({ top: 0, left: 0, width: 0 });
+
+  const suggestions = useMemo(() => {
+    if (!query.trim()) return [];
+    const q = query.toLowerCase();
+    const fm = baseFields
+      .filter(f => f.field.toLowerCase().includes(q) || (f.label || "").toLowerCase().includes(q))
+      .slice(0, 9)
+      .map(f => ({ field: f.field, label: f.label, inputType: f.input_type, src: "palette" as const, placed: placed.has(f.field) }));
+    const mm = metaFields
+      .filter(f => f.field.toLowerCase().includes(q))
+      .slice(0, 5)
+      .map(f => ({ field: f.field, label: "", inputType: "onebox", src: "meta" as const, placed: placed.has(f.field) }));
+    return [...fm, ...mm].slice(0, 13);
+  }, [query, baseFields, metaFields, placed]);
+
+  // Recalculate portal position on open
+  useEffect(() => {
+    if (!open || !wrapRef.current) return;
+    const r = wrapRef.current.getBoundingClientRect();
+    setDropPos({ top: r.bottom + 2, left: r.left, width: r.width });
+  }, [open, query]);
+
+  function pick(fieldName: string, src: "palette" | "meta") {
+    onAdd(fieldName, src);
+    setQuery(""); setOpen(false); setActiveIdx(-1);
+    inputRef.current?.focus();
+  }
+
+  function handleKey(e: React.KeyboardEvent) {
+    if (!open || !suggestions.length) {
+      if (e.key === "Escape") { setQuery(""); setOpen(false); }
+      return;
+    }
+    if (e.key === "ArrowDown") { e.preventDefault(); setActiveIdx(i => Math.min(i + 1, suggestions.length - 1)); }
+    if (e.key === "ArrowUp")   { e.preventDefault(); setActiveIdx(i => Math.max(i - 1, 0)); }
+    if (e.key === "Enter" && activeIdx >= 0) { e.preventDefault(); const s = suggestions[activeIdx]; pick(s.field, s.src); }
+    if (e.key === "Escape") { setOpen(false); setActiveIdx(-1); }
+  }
+
+  const dropdown = open && suggestions.length > 0 && createPortal(
+    <div style={{
+      position: "fixed", top: dropPos.top, left: dropPos.left, width: Math.max(dropPos.width, 260),
+      zIndex: 99999, background: "#fff", border: "1px solid var(--border)",
+      borderRadius: 8, boxShadow: "0 8px 32px rgba(0,0,0,0.16)", overflow: "hidden",
+    }}>
+      {suggestions.map((s, idx) => (
+        <div key={s.field + s.src}
+          onMouseDown={e => { e.preventDefault(); pick(s.field, s.src); }}
+          style={{
+            display: "flex", alignItems: "center", gap: 7, padding: "6px 10px",
+            background: idx === activeIdx ? "#f5f3ff" : s.placed ? "#f9fafb" : "#fff",
+            cursor: "pointer", borderBottom: "1px solid #f3f4f6",
+            transition: "background 0.08s",
+          }}
+          onMouseEnter={() => setActiveIdx(idx)}
+        >
+          {s.src === "palette" ? (
+            <span style={{ width: 16, height: 16, borderRadius: 3, background: inputTypeBg(s.inputType), color: inputTypeColor(s.inputType), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, fontWeight: 700, flexShrink: 0 }}>
+              {inputIcon(s.inputType)}
+            </span>
+          ) : (
+            <span style={{ width: 16, height: 16, borderRadius: 3, background: "#e0e7ff", color: "#4338ca", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 8, fontWeight: 700, flexShrink: 0 }}>M</span>
+          )}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: s.placed ? "var(--muted)" : "#1e293b" }}>
+              {s.field}
+            </div>
+            {s.label && s.label !== s.field && (
+              <div style={{ fontSize: 10, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</div>
+            )}
+          </div>
+          {s.placed
+            ? <span style={{ fontSize: 9, color: "#86efac", flexShrink: 0 }}>✓ placed</span>
+            : <span style={{ fontSize: 9, color: "var(--muted)", flexShrink: 0 }}>click to add</span>
+          }
+        </div>
+      ))}
+      <div style={{ padding: "5px 10px", fontSize: 10, color: "var(--muted)", background: "#f9fafb", borderTop: "1px solid #f3f4f6", display: "flex", gap: 8 }}>
+        <span>↵ add</span><span>↑↓ navigate</span><span>Esc close</span>
+      </div>
+    </div>,
+    document.body
+  );
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative", width: "100%" }}>
+      <span style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", fontSize: 12, pointerEvents: "none", zIndex: 1 }}>⌕</span>
+      <input
+        ref={inputRef}
+        value={query}
+        onChange={e => { setQuery(e.target.value); setOpen(true); setActiveIdx(-1); }}
+        onFocus={() => { if (query.trim()) setOpen(true); }}
+        onBlur={() => setTimeout(() => setOpen(false), 160)}
+        onKeyDown={handleKey}
+        placeholder={placeholder}
+        style={{ ...iSt, marginBottom: 0, paddingLeft: 24, paddingRight: query ? 26 : 8, width: "100%", boxSizing: "border-box", fontSize: 11 }}
+        autoComplete="off"
+      />
+      {query && (
+        <button
+          onClick={() => { setQuery(""); setOpen(false); inputRef.current?.focus(); }}
+          style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: 12, padding: 0, zIndex: 1, lineHeight: 1 }}
+        >✕</button>
+      )}
+      {dropdown}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TypeaheadSidebar — left panel of the main FormEditor
+// ─────────────────────────────────────────────────────────────────────────────
+
 function TypeaheadSidebar({ baseFields, metaFields, metaLoading, metaTotal, metaPage,
   onLoadMoreMeta, placed, onDragStart, onClickAdd }: {
   baseFields: BaseField[]; metaFields: MetaField[];
@@ -291,46 +423,19 @@ function TypeaheadSidebar({ baseFields, metaFields, metaLoading, metaTotal, meta
   onClickAdd: (fn: string, src: "palette" | "meta") => void;
 }) {
   const [mode, setMode] = useState<"form" | "meta">("form");
-  const [query, setQuery] = useState("");
-  const [showDrop, setShowDrop] = useState(false);
-  const [activeIdx, setActiveIdx] = useState(-1);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const suggestions = useMemo(() => {
-    if (!query.trim()) return [];
-    const q = query.toLowerCase();
-    const fm = baseFields.filter(f => f.field.toLowerCase().includes(q) || f.label.toLowerCase().includes(q)).slice(0, 8).map(f => ({ field: f, src: "palette" as const }));
-    const mm = metaFields.filter(f => f.field.toLowerCase().includes(q)).slice(0, 5).map(f => ({ field: f as any, src: "meta" as const }));
-    return [...fm, ...mm].slice(0, 12);
-  }, [query, baseFields, metaFields]);
-
-  function handleKey(e: React.KeyboardEvent) {
-    if (!showDrop || !suggestions.length) return;
-    if (e.key === "ArrowDown") { e.preventDefault(); setActiveIdx(i => Math.min(i + 1, suggestions.length - 1)); }
-    if (e.key === "ArrowUp")   { e.preventDefault(); setActiveIdx(i => Math.max(i - 1, 0)); }
-    if (e.key === "Enter" && activeIdx >= 0) {
-      e.preventDefault();
-      const s = suggestions[activeIdx];
-      onClickAdd(s.field.field, s.src);
-      setQuery(""); setShowDrop(false); setActiveIdx(-1);
-    }
-    if (e.key === "Escape") { setShowDrop(false); setActiveIdx(-1); }
-  }
 
   const grouped = useMemo(() => {
-    const q = query.toLowerCase();
-    const filtered = query.trim() ? baseFields.filter(f => f.field.toLowerCase().includes(q) || f.label.toLowerCase().includes(q)) : baseFields;
     const g: Record<string, BaseField[]> = {};
-    for (const f of filtered) { if (!g[f.input_type]) g[f.input_type] = []; g[f.input_type].push(f); }
+    for (const f of baseFields) { if (!g[f.input_type]) g[f.input_type] = []; g[f.input_type].push(f); }
     return g;
-  }, [baseFields, query]);
+  }, [baseFields]);
 
   const sortedTypes = useMemo(() => Object.keys(grouped).sort((a, b) => grouped[b].length - grouped[a].length), [grouped]);
 
   return (
-    <div style={{ width: 230, borderRight: "1px solid var(--border)", background: "#fff", display: "flex", flexDirection: "column", flexShrink: 0, overflowX: "visible", overflowY: "visible" }}>
-      {/* Mode tabs — pill style */}
+    <div style={{ width: 230, borderRight: "1px solid var(--border)", background: "#fff", display: "flex", flexDirection: "column", flexShrink: 0 }}>
+      {/* Pill mode tabs */}
       <div style={{ display: "flex", gap: 2, padding: "8px 8px 6px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
         {(["form", "meta"] as const).map((m, i) => (
           <button key={m} onClick={() => setMode(m)} style={{
@@ -347,66 +452,19 @@ function TypeaheadSidebar({ baseFields, metaFields, metaLoading, metaTotal, meta
         ))}
       </div>
 
-      {/* Typeahead */}
-      <div style={{ padding: "6px 8px 4px", borderBottom: "1px solid var(--border)", flexShrink: 0, position: "relative" }}>
-        <div style={{ position: "relative" }}>
-          <span style={{ position: "absolute", left: 7, top: "50%", transform: "translateY(-50%)", color: "var(--muted)", fontSize: 12, pointerEvents: "none" }}>⌕</span>
-          <input
-            ref={inputRef} value={query}
-            onChange={e => { setQuery(e.target.value); setShowDrop(true); setActiveIdx(-1); }}
-            onFocus={() => { if (query.trim()) setShowDrop(true); }}
-            onBlur={() => setTimeout(() => setShowDrop(false), 140)}
-            onKeyDown={handleKey}
-            placeholder={mode === "form" ? "Search fields…" : "Search all metadata…"}
-            style={{ ...iSt, marginBottom: 0, paddingLeft: 22, fontSize: 11 }}
-          />
-          {query && (
-            <button onClick={() => { setQuery(""); setShowDrop(false); inputRef.current?.focus(); }}
-              style={{ position: "absolute", right: 5, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: 11, padding: 0 }}>
-              ✕
-            </button>
-          )}
-        </div>
-
-        {/* Dropdown */}
-        {showDrop && suggestions.length > 0 && (
-          <div style={{
-            position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, zIndex: 9999,
-            background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 6,
-            boxShadow: "0 6px 20px rgba(0,0,0,0.12)", overflow: "hidden", marginTop: 2,
-          }}>
-            {suggestions.map((sug, idx) => {
-              const f = sug.field as any;
-              const isPlaced = placed.has(f.field);
-              return (
-                <div key={f.field}
-                  onMouseDown={e => { e.preventDefault(); onClickAdd(f.field, sug.src); setQuery(""); setShowDrop(false); }}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 6, padding: "5px 9px",
-                    background: idx === activeIdx ? "#f5f3ff" : isPlaced ? "var(--bg)" : "var(--surface)",
-                    cursor: "pointer", borderBottom: "1px solid var(--border)",
-                  }}>
-                  {sug.src === "palette" ? (
-                    <span style={{ width: 14, height: 14, borderRadius: 3, background: inputTypeBg((f as BaseField).input_type), color: inputTypeColor((f as BaseField).input_type), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 7, fontWeight: 700, flexShrink: 0 }}>
-                      {inputIcon((f as BaseField).input_type)}
-                    </span>
-                  ) : (
-                    <span style={{ width: 14, height: 14, borderRadius: 3, background: "#e0e7ff", color: "#4338ca", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 7, fontWeight: 700, flexShrink: 0 }}>M</span>
-                  )}
-                  <span style={{ flex: 1, fontSize: 11, fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.field}</span>
-                  {isPlaced && <span style={{ fontSize: 9, color: "#86efac" }}>✓</span>}
-                </div>
-              );
-            })}
-            <div style={{ padding: "4px 9px", fontSize: 9, color: "var(--muted)", background: "var(--bg)", borderTop: "1px solid var(--border)" }}>
-              Click to add · Drag to position
-            </div>
-          </div>
-        )}
+      {/* Typeahead search — portal-based, always on top */}
+      <div style={{ padding: "7px 8px 6px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+        <FieldSearch
+          baseFields={baseFields}
+          metaFields={metaFields}
+          placed={placed}
+          onAdd={(fn, src) => onClickAdd(fn, src)}
+          placeholder={mode === "form" ? "Search & add fields…" : "Search all metadata…"}
+        />
       </div>
 
-      {/* Body */}
-      <div style={{ flex: 1, overflowY: "auto" }}>
+      {/* Body — scrollable list */}
+      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
         {mode === "form" ? (
           <>
             {sortedTypes.map(type => {
@@ -414,8 +472,9 @@ function TypeaheadSidebar({ baseFields, metaFields, metaLoading, metaTotal, meta
               const isCollapsed = collapsed[type] ?? false;
               return (
                 <div key={type}>
-                  <div onClick={() => setCollapsed(p => ({ ...p, [type]: !isCollapsed }))}
-                    style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 8px", cursor: "pointer", userSelect: "none", background: "var(--bg)", borderBottom: "1px solid var(--border)", position: "sticky", top: 0, zIndex: 1 }}>
+                  <div
+                    onClick={() => setCollapsed(p => ({ ...p, [type]: !isCollapsed }))}
+                    style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 8px", cursor: "pointer", userSelect: "none", background: "#fafafa", borderBottom: "1px solid var(--border)", position: "sticky", top: 0, zIndex: 1 }}>
                     <span style={{ width: 13, height: 13, borderRadius: 3, background: inputTypeBg(type), color: inputTypeColor(type), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 7, fontWeight: 700, flexShrink: 0 }}>{inputIcon(type)}</span>
                     <span style={{ fontSize: 10, fontWeight: 600, flex: 1, textTransform: "capitalize" }}>{type}</span>
                     <span style={{ fontSize: 9, color: "var(--muted)" }}>{fields.length}</span>
@@ -438,17 +497,15 @@ function TypeaheadSidebar({ baseFields, metaFields, metaLoading, metaTotal, meta
               );
             })}
             {sortedTypes.length === 0 && <div style={{ color: "var(--muted)", fontSize: 11, padding: "16px 8px", textAlign: "center" }}>No fields match</div>}
-
-            {/* Legend */}
             <div style={{ padding: "6px 8px", borderTop: "1px solid var(--border)", fontSize: 9, color: "var(--muted)" }}>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {[["#fde68a", "Required"], ["#e9d5ff", "Group"], ["#bfdbfe", "Authority"], ["#d9f99d", "Pairs"]].map(([c, l]) => (
+                {[["#fde68a","Required"],["#e9d5ff","Group"],["#bfdbfe","Authority"],["#d9f99d","Pairs"]].map(([c,l]) => (
                   <span key={l} style={{ display: "flex", alignItems: "center", gap: 2 }}>
                     <span style={{ width: 6, height: 6, borderRadius: 2, background: c, display: "inline-block" }} />{l}
                   </span>
                 ))}
               </div>
-              <div style={{ marginTop: 3 }}>Click or drag to add · ✓ placed</div>
+              <div style={{ marginTop: 3 }}>Use search above · click or drag · ✓ = placed</div>
             </div>
           </>
         ) : (
@@ -461,14 +518,14 @@ function TypeaheadSidebar({ baseFields, metaFields, metaLoading, metaTotal, meta
                   onDragStart={e => onDragStart(e, f.field, "meta")}
                   onClick={placed.has(f.field) ? undefined : () => onClickAdd(f.field, "meta")}
                   title={`${f.field}${f.scope_note ? "\n" + f.scope_note : ""}`}
-                  style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 9px", borderBottom: "1px solid var(--border)", background: placed.has(f.field) ? "var(--bg)" : "var(--surface)", cursor: placed.has(f.field) ? "default" : "pointer", opacity: placed.has(f.field) ? 0.5 : 1, fontSize: 11, fontFamily: "monospace", userSelect: "none" }}>
+                  style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 9px", borderBottom: "1px solid var(--border)", background: placed.has(f.field) ? "#fafafa" : "#fff", cursor: placed.has(f.field) ? "default" : "pointer", opacity: placed.has(f.field) ? 0.5 : 1, fontSize: 11, fontFamily: "monospace", userSelect: "none" }}>
                   <span style={{ width: 13, height: 13, borderRadius: 2, background: "#e0e7ff", color: "#4338ca", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 7, fontWeight: 700, flexShrink: 0 }}>M</span>
                   <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.field}</span>
                   {placed.has(f.field) && <span style={{ fontSize: 9, color: "#86efac" }}>✓</span>}
                 </div>
               ))}
             {!metaLoading && metaFields.length < metaTotal && (
-              <button onClick={onLoadMoreMeta} style={{ width: "100%", padding: "5px 0", borderTop: "1px solid var(--border)", background: "var(--bg)", fontSize: 11, color: "#7c3aed", cursor: "pointer", border: "none", fontWeight: 600 }}>
+              <button onClick={onLoadMoreMeta} style={{ width: "100%", padding: "5px 0", borderTop: "1px solid var(--border)", background: "#fafafa", fontSize: 11, color: "#7c3aed", cursor: "pointer", border: "none", fontWeight: 600 }}>
                 Load more ({metaTotal - metaFields.length} remaining)
               </button>
             )}
@@ -705,10 +762,11 @@ function AppendZone({ onDrop }: { onDrop: (fn: string) => void }) {
 // ChildFormRows — accordion showing child form fields under group cells
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ChildFormRows({ cols, fieldMap, childFormMap }: {
+function ChildFormRows({ cols, fieldMap, childFormMap, onEditChildForm }: {
   cols: CanvasCell[];
   fieldMap: Map<string, BaseField>;
   childFormMap: Map<string, BaseField[]>;
+  onEditChildForm?: (childFormName: string) => void;
 }) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const entries: Array<{ pf: string; pl: string; cn: string; cf: BaseField[] }> = [];
@@ -729,11 +787,23 @@ function ChildFormRows({ cols, fieldMap, childFormMap }: {
         const open = expanded[pf] ?? true;
         return (
           <div key={pf} style={{ marginLeft: 48, marginBottom: 4, borderLeft: "3px solid #c4b5fd", paddingLeft: 10 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", userSelect: "none", marginBottom: open ? 3 : 0 }}
-              onClick={() => setExpanded(p => ({ ...p, [pf]: !open }))}>
-              <span style={{ fontSize: 9, color: "#a78bfa", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em" }}>
-                {open ? "▾" : "▸"} {pl} — child form: {cn}
-              </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", userSelect: "none", flex: 1, marginBottom: open ? 3 : 0 }}
+                onClick={() => setExpanded(p => ({ ...p, [pf]: !open }))}>
+                <span style={{ fontSize: 9, color: "#a78bfa", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em" }}>
+                  {open ? "▾" : "▸"} {pl} — child form: <code style={{ color: "#7c3aed" }}>{cn}</code>
+                </span>
+              </div>
+              {onEditChildForm && (
+                <button
+                  onClick={() => onEditChildForm(cn)}
+                  className="btn btn-sm"
+                  style={{ fontSize: 10, padding: "2px 8px", borderColor: "#c4b5fd", color: "#7c3aed", flexShrink: 0 }}
+                  title={`Edit child form "${cn}"`}
+                >
+                  ✏ Edit
+                </button>
+              )}
             </div>
             {open && (
               <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -762,11 +832,12 @@ function ChildFormRows({ cols, fieldMap, childFormMap }: {
 // FieldInspector
 // ─────────────────────────────────────────────────────────────────────────────
 
-function FieldInspector({ base, cf, rowIdx, colIdx, onUpdate, onRemove, onMoveUp, onMoveDown, canUp, canDown, formList }: {
+function FieldInspector({ base, cf, rowIdx, colIdx, onUpdate, onRemove, onMoveUp, onMoveDown, canUp, canDown, formList, onEditChildForm }: {
   base: BaseField; cf: CanvasCell; rowIdx: number; colIdx: number;
   onUpdate: (p: Partial<CanvasCell>) => void; onRemove: () => void;
   onMoveUp: () => void; onMoveDown: () => void; canUp: boolean; canDown: boolean;
   formList: FormListItem[];
+  onEditChildForm?: (childFormName: string) => void;
 }) {
   const isGroup   = base.input_type === "group" || base.input_type === "inline-group";
   const isDropdown = base.input_type === "dropdown" || base.input_type === "qualdrop_value";
@@ -876,6 +947,24 @@ function FieldInspector({ base, cf, rowIdx, colIdx, onUpdate, onRemove, onMoveUp
               <option value="">— default ({base.child_form_name_resolved || base.child_form_name || "none"}) —</option>
               {formList.map(f => <option key={f.id} value={f.name}>{f.name}</option>)}
             </select>
+            {effChildForm && onEditChildForm && (
+              <button
+                onClick={() => onEditChildForm(effChildForm)}
+                className="btn btn-sm btn-primary"
+                style={{ width: "100%", marginBottom: 4 }}
+              >
+                ✏ Edit child form "{effChildForm}"
+              </button>
+            )}
+            {!effChildForm && (base.child_form_name_resolved || base.child_form_name) && onEditChildForm && (
+              <button
+                onClick={() => onEditChildForm(base.child_form_name_resolved || base.child_form_name || "")}
+                className="btn btn-sm"
+                style={{ width: "100%", marginBottom: 4, borderColor: "#c4b5fd", color: "#7c3aed" }}
+              >
+                ✏ Edit default child form
+              </button>
+            )}
           </>
         )}
 
@@ -1085,6 +1174,276 @@ function XmlModal({ title, xml, onClose }: { title: string; xml: string; onClose
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ChildFormEditorModal
+// Full canvas editor for a group/inline-group child form, opened in a modal.
+// Uses the same drag-and-drop canvas, field inspector, and XML export as the
+// main FormEditor — but scoped to the child form fields only.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function ChildFormEditorModal({ formName, formId, fieldMap: parentFieldMap, allForms, metaFields, onClose }: {
+  formName: string;
+  formId: number;
+  fieldMap: Map<string, BaseField>;
+  allForms: FormListItem[];
+  metaFields: MetaField[];
+  onClose: () => void;
+}) {
+  const [baseFields,   setBaseFields]   = useState<BaseField[]>([]);
+  const [loading,      setLoading]      = useState(true);
+  const [canvasRows,   setCanvasRows]   = useState<CanvasRow[]>([]);
+  const [sel,          setSel]          = useState<{ row: number; col: number } | null>(null);
+  const [saving,       setSaving]       = useState(false);
+  const [saved,        setSaved]        = useState(false);
+  const [showXml,      setShowXml]      = useState(false);
+
+  // Close on Escape
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [onClose]);
+
+  // Load child form fields
+  useEffect(() => {
+    setLoading(true);
+    cfetch<any>(`/submission-forms/${formId}/`)
+      .then(d => { const f = d.fields ?? []; setBaseFields(f); setCanvasRows(buildCanvas(f)); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [formId]);
+
+  // Build fieldMap for child form (parent fieldMap for fallback resolution)
+  const fieldMap = useMemo(() => {
+    const m = new Map<string, BaseField>(baseFields.map(f => [f.field, f]));
+    // Inherit parent lookups for any shared fields
+    for (const [k, v] of parentFieldMap) { if (!m.has(k)) m.set(k, v); }
+    return m;
+  }, [baseFields, parentFieldMap]);
+
+  const placed = useMemo(() => new Set(canvasRows.flatMap(r => r.cols.map(c => c.field_name))), [canvasRows]);
+
+  // ── Mutations ──────────────────────────────────────────────────────────────
+
+  function moveRow(from: number, to: number) {
+    setCanvasRows(prev => { const rows = [...prev]; const [m] = rows.splice(from, 1); rows.splice(to, 0, m); return rows; });
+    if (sel) {
+      if (sel.row === from) setSel({ ...sel, row: to });
+      else if (from < to && sel.row > from && sel.row <= to) setSel({ ...sel, row: sel.row - 1 });
+      else if (from > to && sel.row >= to && sel.row < from) setSel({ ...sel, row: sel.row + 1 });
+    }
+  }
+
+  function removeField(ri: number, ci: number) {
+    setCanvasRows(prev => { const rows = [...prev]; const row = { ...rows[ri], cols: [...rows[ri].cols] }; if (row.cols.length === 1) rows.splice(ri, 1); else { row.cols.splice(ci, 1); rows[ri] = row; } return rows; });
+    if (sel?.row === ri && sel?.col === ci) setSel(null);
+  }
+
+  function dropOnCell(tr: number, tc: number, fn: string) {
+    if (!fn || placed.has(fn)) return;
+    setCanvasRows(prev => { const rows = [...prev]; const row = { ...rows[tr], cols: [...rows[tr].cols] }; const nc: CanvasCell = { field_name: fn, label_override: "", hint_override: "", hidden: false }; if (tc >= row.cols.length) row.cols = [...row.cols, nc]; else row.cols[tc] = nc; rows[tr] = row; return rows; });
+  }
+
+  function dropAsNewRow(fn: string, after?: number) {
+    if (!fn || placed.has(fn)) return;
+    const nr: CanvasRow = { id: uid(), cols: [{ field_name: fn, label_override: "", hint_override: "", hidden: false }] };
+    setCanvasRows(prev => { const rows = [...prev]; if (after != null) rows.splice(after + 1, 0, nr); else rows.push(nr); return rows; });
+  }
+
+  function handleDrop(payload: DragPayload, targetRow: number, targetCol: number | null) {
+    if (payload.kind === "palette" || payload.kind === "meta") {
+      const fn = payload.fieldName;
+      if (!fn || placed.has(fn)) return;
+      if (targetCol == null) dropAsNewRow(fn, targetRow);
+      else dropOnCell(targetRow, targetCol, fn);
+    } else if (payload.kind === "cell") {
+      const { rowIdx: sr, colIdx: sc } = payload;
+      const dr = targetRow; const dc = targetCol ?? 0;
+      if (sr === dr && sc === dc) return;
+      setCanvasRows(prev => {
+        const rows = prev.map(r => ({ ...r, cols: [...r.cols] }));
+        const sCF = rows[sr]?.cols[sc]; const dCF = rows[dr]?.cols[dc];
+        if (!sCF) return prev;
+        if (dCF) { rows[sr].cols[sc] = dCF; rows[dr].cols[dc] = sCF; }
+        else { rows[dr].cols[dc] = sCF; if (rows[sr].cols.length === 1) rows.splice(sr, 1); else rows[sr].cols.splice(sc, 1); }
+        return rows;
+      });
+      setSel({ row: dr, col: dc });
+    } else if (payload.kind === "row") {
+      if ((payload as any).rowIdx !== targetRow) moveRow((payload as any).rowIdx, targetRow);
+    }
+  }
+
+  function updateOverride(patch: Partial<CanvasCell>) {
+    if (!sel) return;
+    setCanvasRows(prev => prev.map((row, ri) => ri !== sel.row ? row : { ...row, cols: row.cols.map((cf, ci) => ci !== sel.col ? cf : { ...cf, ...patch }) }));
+  }
+
+  async function handleSave() {
+    setSaving(true); setSaved(false);
+    try {
+      await cfetch<any>("/form-layouts/", {
+        method: "POST",
+        body: JSON.stringify({
+          form_name: formName, collection: null, label: `${formName} child form layout`,
+          sections: [{ key: "main", label: formName, sort_order: 0, collapsed_by_default: false, helper_text_above: "", helper_text_below: "",
+            field_overrides: canvasRows.flatMap((row, ri) => row.cols.map((cf, ci) => ({ field_name: cf.field_name, sort_order: ri * 10 + ci, label_override: cf.label_override, hint_override: cf.hint_override, hidden: cf.hidden }))),
+          }], conditional_blocks: [],
+        }),
+        headers: { "Content-Type": "application/json" },
+      });
+      setSaved(true); setTimeout(() => setSaved(false), 2500);
+    } catch (e) { console.error(e); }
+    finally { setSaving(false); }
+  }
+
+  function BetweenRowZone({ afterIdx }: { afterIdx: number }) {
+    const [ov, setOv] = useState(false);
+    return <div
+      onDragOver={e => { e.preventDefault(); setOv(true); }}
+      onDragLeave={() => setOv(false)}
+      onDrop={e => {
+        e.preventDefault(); setOv(false);
+        const p = getDrag();
+        if (!p) return;
+        if (p.kind === "palette" || p.kind === "meta") dropAsNewRow(p.fieldName, afterIdx === -1 ? undefined : afterIdx);
+        else if (p.kind === "row") { const from = (p as any).rowIdx; const to = from <= afterIdx ? afterIdx : afterIdx + 1; if (from !== to) moveRow(from, to); }
+        setDrag(null);
+      }}
+      style={{ height: ov ? 20 : 3, margin: "2px 26px", borderRadius: 4, background: ov ? "#ede9fe" : "transparent", border: ov ? "2px dashed #7c3aed" : "2px dashed transparent", transition: "all 0.1s", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      {ov && <span style={{ fontSize: 9, color: "#7c3aed", fontWeight: 600 }}>Insert row here</span>}
+    </div>;
+  }
+
+  const selRow  = sel ? canvasRows[sel.row] : null;
+  const selCF   = selRow?.cols[sel?.col ?? 0] ?? null;
+  const selBase = selCF ? (fieldMap.get(selCF.field_name) ?? null) : null;
+
+  return (
+    <div
+      style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+      onMouseDown={e => e.target === e.currentTarget && onClose()}
+    >
+      <div style={{ background: "#fff", borderRadius: 12, width: "100%", maxWidth: 1100, height: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 80px rgba(0,0,0,0.25)", overflow: "hidden" }}>
+
+        {/* Modal header */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderBottom: "1px solid var(--border)", flexShrink: 0, background: "#faf5ff" }}>
+          <span style={{ width: 22, height: 22, borderRadius: 5, background: "#ede9fe", color: "#7c3aed", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, flexShrink: 0 }}>⊞</span>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>
+              Child form: <code style={{ color: "#7c3aed" }}>{formName}</code>
+            </div>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>
+              Editing sub-form fields — drag to reorder, click to configure overrides
+            </div>
+          </div>
+          <div style={{ flex: 1 }} />
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>{canvasRows.length} rows · {placed.size} fields</span>
+          <button onClick={() => setShowXml(true)} className="btn btn-sm">&lt;/&gt; XML</button>
+          <button onClick={handleSave} disabled={saving} className={`btn btn-sm ${saved ? "" : "btn-primary"}`}
+            style={saved ? { background: "#d1fae5", color: "#065f46", border: "1px solid #6ee7b7" } : {}}>
+            {saved ? "✓ Saved" : saving ? "Saving…" : "Save Layout"}
+          </button>
+          <button onClick={onClose} className="btn btn-sm" style={{ marginLeft: 4 }} title="Close (Esc)">✕</button>
+        </div>
+
+        {showXml && <XmlModal title={`submission-forms.xml — <form name="${formName}">`} xml={generateFormXml(formName, canvasRows, fieldMap)} onClose={() => setShowXml(false)} />}
+
+        {loading ? (
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)", fontSize: 13 }}>
+            Loading child form…
+          </div>
+        ) : (
+          <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+
+            {/* LEFT: field palette with typeahead */}
+            <div style={{ width: 220, borderRight: "1px solid var(--border)", background: "#fff", display: "flex", flexDirection: "column", flexShrink: 0 }}>
+              {/* Typeahead — covers both child form fields and all metadata */}
+              <div style={{ padding: "8px 8px 6px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>
+                  Fields — {baseFields.length} in form · {placed.size} placed
+                </div>
+                <FieldSearch
+                  baseFields={baseFields}
+                  metaFields={metaFields}
+                  placed={placed}
+                  onAdd={(fn, _src) => { if (!placed.has(fn)) dropAsNewRow(fn); }}
+                  placeholder="Search & add fields…"
+                />
+              </div>
+              {/* Scrollable field list */}
+              <div style={{ flex: 1, overflowY: "auto", padding: "4px 8px" }}>
+                {baseFields.length === 0
+                  ? <div style={{ fontSize: 11, color: "var(--muted)", padding: "12px 4px", fontStyle: "italic" }}>No fields found</div>
+                  : baseFields.map(f => (
+                    <div key={f.field}
+                      draggable={!placed.has(f.field)}
+                      onDragStart={e => { e.dataTransfer.effectAllowed = "move"; setDrag({ kind: "palette", fieldName: f.field }); }}
+                      onDragEnd={() => setDrag(null)}
+                      onClick={() => { if (!placed.has(f.field)) dropAsNewRow(f.field); }}
+                      style={{ marginBottom: 3, cursor: placed.has(f.field) ? "default" : "grab", opacity: placed.has(f.field) ? 0.45 : 1 }}>
+                      <FieldChip base={f} placed={placed.has(f.field)} compact />
+                    </div>
+                  ))
+                }
+              </div>
+            </div>
+
+            {/* CENTRE: canvas */}
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: "#fff" }}>
+              <div style={{ flex: 1, overflowY: "auto", padding: "10px 14px" }}>
+                <div style={{ maxWidth: 580, margin: "0 auto" }}>
+                  <BetweenRowZone afterIdx={-1} />
+                  {canvasRows.length === 0 && (
+                    <div style={{ border: "2px dashed var(--border)", borderRadius: 8, padding: "40px 20px", textAlign: "center", color: "var(--muted)" }}>
+                      <div style={{ fontSize: 24, marginBottom: 8 }}>⊞</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Canvas is empty</div>
+                      <div style={{ fontSize: 12 }}>Use the search above or click/drag fields from the left panel.</div>
+                    </div>
+                  )}
+                  {canvasRows.map((row, ri) => (
+                    <React.Fragment key={row.id}>
+                      <CanvasRowCard
+                        rowIdx={ri} row={row} fieldMap={fieldMap} sel={sel}
+                        onSelect={(r, c) => setSel({ row: r, col: c })}
+                        onDrop={handleDrop}
+                        canUp={ri > 0} canDown={ri < canvasRows.length - 1}
+                        onMoveRow={moveRow}
+                        onRemove={removeField}
+                      />
+                      <BetweenRowZone afterIdx={ri} />
+                    </React.Fragment>
+                  ))}
+                  <AppendZone onDrop={fn => dropAsNewRow(fn)} />
+                </div>
+              </div>
+            </div>
+
+            {/* RIGHT: inspector */}
+            <div style={{ width: 240, borderLeft: "1px solid var(--border)", background: "#fff", overflowY: "auto", flexShrink: 0, display: "flex", flexDirection: "column" }}>
+              {sel && selCF && selBase
+                ? <FieldInspector
+                    base={selBase} cf={selCF} rowIdx={sel.row} colIdx={sel.col}
+                    onUpdate={updateOverride}
+                    onRemove={() => removeField(sel.row, sel.col)}
+                    onMoveUp={() => sel.row > 0 && moveRow(sel.row, sel.row - 1)}
+                    onMoveDown={() => sel.row < canvasRows.length - 1 && moveRow(sel.row, sel.row + 1)}
+                    canUp={sel.row > 0} canDown={sel.row < canvasRows.length - 1}
+                    formList={allForms}
+                  />
+                : <div style={{ padding: 20, color: "var(--muted)", fontSize: 12, textAlign: "center", marginTop: 32 }}>
+                    <div style={{ fontSize: 24, marginBottom: 8 }}>←</div>
+                    Click a field to edit its properties.
+                  </div>
+              }
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // FormEditor
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1102,6 +1461,7 @@ function FormEditor({ formId, formName, onBack, formList }: {
   const [showXml,      setShowXml]      = useState(false);
   const [metaPage,     setMetaPage]     = useState(0);
   const [metaTotal,    setMetaTotal]    = useState(0);
+  const [childFormModal, setChildFormModal] = useState<{ formName: string; formId: number } | null>(null);
   const META_PAGE_SIZE = 200;
 
   useEffect(() => {
@@ -1125,7 +1485,8 @@ function FormEditor({ formId, formName, onBack, formList }: {
       .finally(() => setMetaLoading(false));
   }, [metaPage]);
 
-  const [childFormMap, setChildFormMap] = useState<Map<string, BaseField[]>>(new Map());
+  const [childFormMap, setChildFormMap]     = useState<Map<string, BaseField[]>>(new Map());
+  const [childFormIdMap, setChildFormIdMap] = useState<Map<string, number>>(new Map());
   useEffect(() => {
     const names = new Set<string>();
     for (const f of baseFields) {
@@ -1136,6 +1497,7 @@ function FormEditor({ formId, formName, onBack, formList }: {
     cfetch<any>("/submission-forms/").then((data: any) => {
       const forms: FormListItem[] = data;
       forms.filter(f => names.has(f.name)).forEach(form => {
+        setChildFormIdMap(prev => new Map([...prev, [form.name, form.id]]));
         cfetch<any>(`/submission-forms/${form.id}/`).then((d: any) => {
           setChildFormMap(prev => new Map([...prev, [form.name, d.fields ?? []]]));
         }).catch(() => {});
@@ -1225,6 +1587,11 @@ function FormEditor({ formId, formName, onBack, formList }: {
     setCanvasRows(prev => prev.map((row, ri) => ri !== sel.row ? row : { ...row, cols: row.cols.map((cf, ci) => ci !== sel.col ? cf : { ...cf, ...patch }) }));
   }
 
+  function openChildFormModal(childName: string) {
+    const id = childFormIdMap.get(childName);
+    if (id) setChildFormModal({ formName: childName, formId: id });
+  }
+
   async function handleSave() {
     setSaving(true); setSaved(false);
     try {
@@ -1285,7 +1652,16 @@ function FormEditor({ formId, formName, onBack, formList }: {
 
       {showXml && <XmlModal title={`submission-forms.xml — <form name="${formName}">`} xml={generateFormXml(formName, canvasRows, fieldMap)} onClose={() => setShowXml(false)} />}
 
-      {/* 3-panel */}
+      {childFormModal && (
+        <ChildFormEditorModal
+          formName={childFormModal.formName}
+          formId={childFormModal.formId}
+          fieldMap={fieldMap}
+          allForms={formList}
+          metaFields={metaFields}
+          onClose={() => setChildFormModal(null)}
+        />
+      )}
       <div style={{ display: "flex", flex: 1, overflow: "hidden", background: "#fff", border: "1px solid var(--border)", borderTop: "none", borderRadius: "0 0 8px 8px" }}>
         <TypeaheadSidebar
           baseFields={baseFields} metaFields={metaFields} metaLoading={metaLoading}
@@ -1316,7 +1692,7 @@ function FormEditor({ formId, formName, onBack, formList }: {
                     canUp={ri > 0} canDown={ri < canvasRows.length - 1}
                     onMoveRow={moveRow}
                     onRemove={removeField} />
-                  <ChildFormRows cols={row.cols} fieldMap={fieldMap} childFormMap={childFormMap} />
+                  <ChildFormRows cols={row.cols} fieldMap={fieldMap} childFormMap={childFormMap} onEditChildForm={openChildFormModal} />
                   <BetweenRowZone afterIdx={ri} />
                 </React.Fragment>
               ))}
@@ -1329,7 +1705,7 @@ function FormEditor({ formId, formName, onBack, formList }: {
         {/* Inspector */}
         <div style={{ width: 252, borderLeft: "1px solid var(--border)", background: "#fff", overflowY: "auto", flexShrink: 0, display: "flex", flexDirection: "column" }}>
           {sel && selCF && selBase
-            ? <FieldInspector base={selBase} cf={selCF} rowIdx={sel.row} colIdx={sel.col} onUpdate={updateOverride} onRemove={() => removeField(sel.row, sel.col)} onMoveUp={() => sel.row > 0 && moveRow(sel.row, sel.row - 1)} onMoveDown={() => sel.row < canvasRows.length - 1 && moveRow(sel.row, sel.row + 1)} canUp={sel.row > 0} canDown={sel.row < canvasRows.length - 1} formList={formList} />
+            ? <FieldInspector base={selBase} cf={selCF} rowIdx={sel.row} colIdx={sel.col} onUpdate={updateOverride} onRemove={() => removeField(sel.row, sel.col)} onMoveUp={() => sel.row > 0 && moveRow(sel.row, sel.row - 1)} onMoveDown={() => sel.row < canvasRows.length - 1 && moveRow(sel.row, sel.row + 1)} canUp={sel.row > 0} canDown={sel.row < canvasRows.length - 1} formList={formList} onEditChildForm={openChildFormModal} />
             : <div style={{ padding: 20, color: "var(--muted)", fontSize: 12, textAlign: "center", marginTop: 40 }}><div style={{ fontSize: 28, marginBottom: 8 }}>←</div>Click a field to edit its properties.</div>
           }
         </div>
