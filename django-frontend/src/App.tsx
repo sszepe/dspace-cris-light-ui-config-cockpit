@@ -13,13 +13,22 @@ import { FormLayoutsPage } from "./pages/FormLayoutsPage";
 import { MetadataPage } from "./pages/MetadataPage";
 import { AuditPage } from "./pages/AuditPage";
 import { CrisLayoutPage } from "./pages/CrisLayoutPage";
+import { FormBuilderPage } from "./pages/FormBuilderPage";       // ← NEW
+import { VocabularyEditorPage } from "./pages/VocabularyEditorPage"; // ← NEW
+
+// Cross-page navigation state
+interface NavState {
+  formName?: string;
+}
 
 function PageRouter({
   page,
+  navState,
   onNavigate,
 }: {
   page: PageKey;
-  onNavigate: (page: PageKey, state?: { formName?: string }) => void;
+  navState: NavState;
+  onNavigate: (page: PageKey, state?: NavState) => void;
 }) {
   switch (page) {
     case "dashboard":      return <DashboardPage />;
@@ -27,7 +36,6 @@ function PageRouter({
     case "clusters":       return <ClustersPage />;
     case "mappings":       return <CollectionMappingsPage />;
     case "quicklinks":     return <QuicklinksPage />;
-    case "sub-forms":      return <SubmissionFormsPage />;
     case "sub-processes":
       return (
         <SubmissionProcessesPage
@@ -38,23 +46,33 @@ function PageRouter({
     case "cris-layout":    return <CrisLayoutPage />;
     case "metadata":       return <MetadataPage />;
     case "audit":          return <AuditPage />;
-    default:               return <DashboardPage />;
+
+    // ── NEW pages ────────────────────────────────────────────────────────────
+    case "form-builder":
+      // Also accepts a formName from cross-nav (e.g. navigating from sub-processes)
+      return <FormBuilderPage initialFormName={navState.formName} />;
+
+    case "vocab-editor":
+      return <VocabularyEditorPage />;
+
+    default:
+      return <DashboardPage />;
   }
 }
 
 function AppInner() {
   const { isAuthenticated, isLoading } = useAuth();
   const [page, setPage] = useState<PageKey>("dashboard");
-  // Carries cross-page navigation state (e.g. which form to pre-select)
-  const [pageState, setPageState] = useState<{ formName?: string }>({});
+  const [navState, setNavState] = useState<NavState>({});
 
-  function handleNavigate(nextPage: PageKey, state?: { formName?: string }) {
-    setPageState(state ?? {});
+  function handleNavigate(nextPage: PageKey, state?: NavState) {
+    setNavState(state ?? {});
     setPage(nextPage);
   }
 
-  // When the user clicks a sidebar item directly, clear any carry-over state
   function handleSidebarNavigate(nextPage: PageKey) {
+    // Clear carry-over state when the user clicks a sidebar item directly,
+    // EXCEPT for form-builder which should re-mount cleanly.
     handleNavigate(nextPage);
   }
 
@@ -80,15 +98,21 @@ function AppInner() {
     return <LoginPage />;
   }
 
-  // Re-mount SubmissionFormsPage whenever formName changes so it auto-selects
-  const subFormsKey = page === "sub-forms" ? (pageState.formName ?? "") : "";
+  // sub-forms: re-mount when formName changes so the form is auto-selected
+  const subFormsKey = page === "sub-forms" ? (navState.formName ?? "") : "";
+
+  // form-builder: re-mount when formName changes (cross-nav from processes)
+  const formBuilderKey = page === "form-builder" ? (navState.formName ?? "") : "";
 
   return (
     <Shell activePage={page} onNavigate={handleSidebarNavigate}>
       {page === "sub-forms" ? (
-        <SubmissionFormsPage key={subFormsKey} initialFormName={pageState.formName} />
+        <SubmissionFormsPage key={subFormsKey} initialFormName={navState.formName} />
+      ) : page === "form-builder" ? (
+        // Form builder needs its own key so it re-mounts on cross-nav
+        <FormBuilderPage key={formBuilderKey} initialFormName={navState.formName} />
       ) : (
-        <PageRouter page={page} onNavigate={handleNavigate} />
+        <PageRouter page={page} navState={navState} onNavigate={handleNavigate} />
       )}
     </Shell>
   );

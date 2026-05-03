@@ -14,17 +14,15 @@ import {
 
 interface LayoutForm {
   form_name: string;
-  profile: string;
   collection: string;
   label: string;
 }
 
-const EMPTY: LayoutForm = { form_name: "", profile: "plain", collection: "", label: "" };
+const EMPTY: LayoutForm = { form_name: "", collection: "", label: "" };
 
 function fromLayout(l: FormLayout): LayoutForm {
   return {
     form_name: l.form_name,
-    profile: l.profile,
     collection: l.collection ?? "",
     label: l.label,
   };
@@ -76,7 +74,7 @@ export function FormLayoutsPage() {
   async function save() {
     setSaving(true);
     try {
-      const body = { ...form, collection: form.collection || null };
+      const body = { ...form, collection: form.collection || null, profile: "plain" };
       if (modal.layout) {
         await api.patchLayout(modal.layout.id, body);
         notify("success", "Layout updated.");
@@ -94,7 +92,7 @@ export function FormLayoutsPage() {
   }
 
   async function del(l: FormLayout) {
-    if (!confirm(`Delete layout "${l.form_name} / ${l.profile}"?`)) return;
+    if (!confirm(`Delete layout "${l.form_name}"?`)) return;
     try {
       await api.deleteLayout(l.id);
       if (selected?.id === l.id) setSelected(null);
@@ -136,7 +134,6 @@ export function FormLayoutsPage() {
                   <div>
                     <div style={{ fontWeight: 700, fontSize: 13 }}>{l.form_name}</div>
                     <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>
-                      <span className="chip chip-blue" style={{ marginRight: 4 }}>{l.profile}</span>
                       {l.collection ? (
                         <code>{l.collection.slice(0, 8)}…</code>
                       ) : (
@@ -168,7 +165,7 @@ export function FormLayoutsPage() {
           ) : (
             <>
               <div className="card-title">
-                {selected.form_name} / <span className="chip chip-blue">{selected.profile}</span>
+                {selected.form_name}
               </div>
 
               {/* Sections */}
@@ -242,24 +239,15 @@ export function FormLayoutsPage() {
               placeholder="e.g. traditionalpageone"
             />
           </FormGroup>
-          <div className="form-row">
-            <FormGroup label="Profile" hint="e.g. plain, mdw">
-              <input
-                type="text"
-                value={form.profile}
-                onChange={(e) => set({ profile: e.target.value })}
-                placeholder="plain"
-              />
-            </FormGroup>
-            <FormGroup label="Collection UUID (optional)" hint="Leave blank to apply to all collections">
-              <input
-                type="text"
-                value={form.collection}
-                onChange={(e) => set({ collection: e.target.value })}
-                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-              />
-            </FormGroup>
-          </div>
+
+          <FormGroup label="Collection UUID (optional)" hint="Leave blank to apply to all collections">
+            <input
+              type="text"
+              value={form.collection}
+              onChange={(e) => set({ collection: e.target.value })}
+              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+            />
+          </FormGroup>
           <FormGroup label="Label (optional)" hint="Human-readable description of this layout">
             <input
               type="text"

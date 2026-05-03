@@ -238,12 +238,44 @@ export function QuicklinksPage() {
     }
   }
 
+  const [exportingDiscovery, setExportingDiscovery] = useState(false);
+
+  async function downloadDiscoveryXml() {
+    setExportingDiscovery(true);
+    try {
+      const res = await fetch("/api/dspace-config/discovery-xml/", { credentials: "include" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "discovery.xml";
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch {
+      notify("error", "Failed to export discovery.xml.");
+    } finally {
+      setExportingDiscovery(false);
+    }
+  }
+
   return (
     <div>
       <PageHeader
         title="Quicklink Presets"
         desc="Configure the presets shown on the Quicklinks tab. Each preset can have multiple facet filters."
-        actions={<button className="btn btn-primary" onClick={openNew}>+ New Preset</button>}
+        actions={
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              className="btn"
+              onClick={downloadDiscoveryXml}
+              disabled={exportingDiscovery}
+              title="Download discovery.xml patched with all current quicklink facets"
+            >
+              {exportingDiscovery ? <><Spinner /> Exporting…</> : "⬇ discovery.xml"}
+            </button>
+            <button className="btn btn-primary" onClick={openNew}>+ New Preset</button>
+          </div>
+        }
       />
 
       {notice && <Alert type={notice.type}>{notice.msg}</Alert>}

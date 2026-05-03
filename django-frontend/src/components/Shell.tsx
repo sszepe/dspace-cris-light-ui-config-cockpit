@@ -12,6 +12,8 @@ export type PageKey =
   | "sub-forms"
   | "sub-processes"
   | "form-layouts"
+  | "form-builder"      // ← NEW: visual drag-and-drop form builder
+  | "vocab-editor"      // ← NEW: controlled vocabulary XML editor
   | "cris-layout"
   | "metadata"
   | "audit";
@@ -24,17 +26,19 @@ interface NavEntry {
 }
 
 const NAV: NavEntry[] = [
-  { key: "dashboard",      label: "Overview",            icon: "🏠", section: "General" },
-  { key: "settings",       label: "Site Settings",       icon: "⚙️",  section: "General" },
-  { key: "clusters",       label: "Entity Clusters",     icon: "🗂️",  section: "Dashboard" },
-  { key: "mappings",       label: "Collection Mappings", icon: "🔗",  section: "Submission" },
-  { key: "quicklinks",     label: "Quicklink Presets",   icon: "⚡",  section: "Navigation" },
-  { key: "sub-forms",      label: "Submission Forms",    icon: "📋",  section: "Submission" },
-  { key: "sub-processes",  label: "Submission Processes",icon: "🔄",  section: "Submission" },
-  { key: "form-layouts",   label: "Form Layouts",        icon: "✏️",  section: "Submission" },
-  { key: "cris-layout",    label: "CRIS Layout",         icon: "🖼️",  section: "Layout" },
-  { key: "metadata",       label: "Metadata Registry",   icon: "🔍",  section: "Data" },
-  { key: "audit",          label: "Audit",               icon: "📊",  section: "Data" },
+  { key: "dashboard",      label: "Overview",             icon: "🏠", section: "General" },
+  { key: "settings",       label: "Site Settings",        icon: "⚙️",  section: "General" },
+  { key: "clusters",       label: "Entity Clusters",      icon: "🗂️",  section: "Dashboard" },
+  { key: "mappings",       label: "Collection Mappings",  icon: "🔗",  section: "Submission" },
+  { key: "quicklinks",     label: "Quicklink Presets",    icon: "⚡",  section: "Navigation" },
+  { key: "sub-forms",      label: "Submission Forms",     icon: "📋",  section: "Submission" },
+  { key: "sub-processes",  label: "Submission Processes", icon: "🔄",  section: "Submission" },
+  { key: "form-layouts",   label: "Form Layouts",         icon: "✏️",  section: "Submission" },
+  { key: "form-builder",   label: "Form Builder",         icon: "🧩",  section: "Submission" }, // ← NEW
+  { key: "vocab-editor",   label: "Vocabulary Editor",    icon: "📚",  section: "Submission" }, // ← NEW
+  { key: "cris-layout",    label: "CRIS Layout",          icon: "🖼️",  section: "Layout" },
+  { key: "metadata",       label: "Metadata Registry",    icon: "🔍",  section: "Data" },
+  { key: "audit",          label: "Audit",                icon: "📊",  section: "Data" },
 ];
 
 const SECTIONS = [...new Set(NAV.map((n) => n.section))];
