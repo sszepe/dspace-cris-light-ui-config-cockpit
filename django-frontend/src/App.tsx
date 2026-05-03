@@ -13,8 +13,9 @@ import { FormLayoutsPage } from "./pages/FormLayoutsPage";
 import { MetadataPage } from "./pages/MetadataPage";
 import { AuditPage } from "./pages/AuditPage";
 import { CrisLayoutPage } from "./pages/CrisLayoutPage";
-import { FormBuilderPage } from "./pages/FormBuilderPage";       // ← NEW
-import { VocabularyEditorPage } from "./pages/VocabularyEditorPage"; // ← NEW
+import { FormBuilderPage } from "./pages/FormBuilderPage";
+import { VocabularyEditorPage } from "./pages/VocabularyEditorPage";
+import { ValuePairsPage } from "./pages/ValuePairsPage";
 
 // Cross-page navigation state
 interface NavState {
@@ -54,6 +55,9 @@ function PageRouter({
 
     case "vocab-editor":
       return <VocabularyEditorPage />;
+
+    case "value-pairs":
+      return <ValuePairsPage />;
 
     default:
       return <DashboardPage />;

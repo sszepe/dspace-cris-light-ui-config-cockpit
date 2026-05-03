@@ -12,8 +12,9 @@ export type PageKey =
   | "sub-forms"
   | "sub-processes"
   | "form-layouts"
-  | "form-builder"      // ← NEW: visual drag-and-drop form builder
-  | "vocab-editor"      // ← NEW: controlled vocabulary XML editor
+  | "form-builder"      // visual drag-and-drop form builder
+  | "vocab-editor"      // controlled vocabulary XML editor
+  | "value-pairs"       // submission form value-pair sets editor
   | "cris-layout"
   | "metadata"
   | "audit";
@@ -34,8 +35,9 @@ const NAV: NavEntry[] = [
   { key: "sub-forms",      label: "Submission Forms",     icon: "📋",  section: "Submission" },
   { key: "sub-processes",  label: "Submission Processes", icon: "🔄",  section: "Submission" },
   { key: "form-layouts",   label: "Form Layouts",         icon: "✏️",  section: "Submission" },
-  { key: "form-builder",   label: "Form Builder",         icon: "🧩",  section: "Submission" }, // ← NEW
-  { key: "vocab-editor",   label: "Vocabulary Editor",    icon: "📚",  section: "Submission" }, // ← NEW
+  { key: "form-builder",   label: "Form Builder",         icon: "🧩",  section: "Submission" },
+  { key: "vocab-editor",   label: "Vocabulary Editor",    icon: "📚",  section: "Submission" },
+  { key: "value-pairs",    label: "Value Pairs",          icon: "🔢",  section: "Submission" },
   { key: "cris-layout",    label: "CRIS Layout",          icon: "🖼️",  section: "Layout" },
   { key: "metadata",       label: "Metadata Registry",    icon: "🔍",  section: "Data" },
   { key: "audit",          label: "Audit",                icon: "📊",  section: "Data" },
